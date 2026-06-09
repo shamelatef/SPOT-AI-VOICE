@@ -40,11 +40,48 @@ function calcMyScore(myAnswers, rounds) {
 }
 
 // choice/ai: 0 = Real voice, 1 = AI-generated voice
+// audio: direct URL or YouTube URL  |  ytStart/ytEnd: crop in seconds (YouTube only)
 const DEFAULT_ROUNDS = Array.from({ length: 10 }, (_, i) => ({
   label: `Round ${i + 1}`,
   audio: '',
+  ytStart: 0,
+  ytEnd: '',
   ai: 0,
 }));
+
+// ─── YouTube helpers ──────────────────────────────────────────────────────────
+function parseYouTube(url) {
+  if (!url) return null;
+  const patterns = [
+    /[?&]v=([^&\s#]+)/,
+    /youtu\.be\/([^?&\s#]+)/,
+    /youtube\.com\/shorts\/([^?&\s#]+)/,
+    /youtube\.com\/embed\/([^?&\s#]+)/,
+  ];
+  for (const p of patterns) { const m = url.match(p); if (m) return m[1]; }
+  return null;
+}
+
+function YTPlayer({ videoId, ytStart = 0, ytEnd = '', height = 200 }) {
+  const p = new URLSearchParams({ start: ytStart || 0, rel: 0, modestbranding: 1 });
+  if (ytEnd !== '' && ytEnd !== null) p.set('end', ytEnd);
+  const src = `https://www.youtube-nocookie.com/embed/${videoId}?${p}`;
+  return (
+    <iframe key={src} width="100%" height={height} src={src}
+      allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+      allowFullScreen style={{ border: 'none', borderRadius: 8, display: 'block' }} />
+  );
+}
+
+// Renders YouTube iframe or <audio> automatically based on what's in the round
+function AudioPlayer({ rd, height = 200 }) {
+  const ytId = parseYouTube(rd?.audio);
+  if (!rd?.audio) return (
+    <div style={{ textAlign: 'center', color: '#444', fontSize: 13, padding: 24 }}>No audio set</div>
+  );
+  if (ytId) return <YTPlayer videoId={ytId} ytStart={rd.ytStart ?? 0} ytEnd={rd.ytEnd ?? ''} height={height} />;
+  return <audio src={rd.audio} controls style={{ width: '100%' }} />;
+}
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const pg = {
@@ -268,9 +305,10 @@ function HostFlow() {
 }
 
 // ─── Host: Setup ──────────────────────────────────────────────────────────────
-function AudioSlot({ url, onChange, roundIdx, session }) {
+function AudioSlot({ rd, onChangeField, roundIdx, session }) {
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
+  const ytId = parseYouTube(rd.audio);
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
@@ -279,18 +317,20 @@ function AudioSlot({ url, onChange, roundIdx, session }) {
     const path = `${session}/${roundIdx}-${Date.now()}.${file.name.split('.').pop()}`;
     const publicUrl = await uploadAudio(file, path);
     setUploading(false);
-    if (publicUrl) onChange(publicUrl);
+    if (publicUrl) onChangeField('audio', publicUrl);
     else alert('Upload failed — check that the "game-audio" bucket exists and is public in Supabase.');
   };
 
   return (
     <div>
       <div style={{ color: '#555', fontSize: 10, marginBottom: 4, fontFamily: 'monospace', letterSpacing: 1 }}>
-        VOICE CLIP — URL or upload
+        VOICE CLIP — YouTube URL · direct audio URL · or upload
       </div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-        <input value={url} onChange={e => onChange(e.target.value)}
-          placeholder="https://… or upload →" style={{ ...inp, flex: 1 }} />
+
+      {/* URL row */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+        <input value={rd.audio} onChange={e => onChangeField('audio', e.target.value)}
+          placeholder="https://youtube.com/watch?v=… or https://… audio file" style={{ ...inp, flex: 1 }} />
         {hasDB && (
           <>
             <button onClick={() => fileRef.current?.click()} disabled={uploading}
@@ -301,7 +341,41 @@ function AudioSlot({ url, onChange, roundIdx, session }) {
           </>
         )}
       </div>
-      {url && <audio src={url} controls style={{ width: '100%', height: 36, display: 'block' }} />}
+
+      {/* YouTube embed + crop controls */}
+      {ytId && (
+        <div style={{ ...card, background: '#0d0d18', marginBottom: 0 }}>
+          <YTPlayer videoId={ytId} ytStart={rd.ytStart ?? 0} ytEnd={rd.ytEnd ?? ''} height={190} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+            <span style={{ color: '#f0e040', fontSize: 11, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>✂️ CROP PREVIEW</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: '#888', fontSize: 11 }}>Start (sec)</span>
+              <input type="number" min={0} step={1}
+                key={`s-${rd.ytStart}`}
+                defaultValue={rd.ytStart ?? 0}
+                onBlur={e => onChangeField('ytStart', Math.max(0, +e.target.value || 0))}
+                onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+                style={{ ...inp, width: 72, textAlign: 'center' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: '#888', fontSize: 11 }}>End (sec)</span>
+              <input type="number" min={0} step={1}
+                key={`e-${rd.ytEnd}`}
+                defaultValue={rd.ytEnd ?? ''}
+                placeholder="end"
+                onBlur={e => onChangeField('ytEnd', e.target.value === '' ? '' : Math.max(0, +e.target.value))}
+                onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+                style={{ ...inp, width: 72, textAlign: 'center' }} />
+            </div>
+            <span style={{ color: '#444', fontSize: 10 }}>Tab out / Enter to refresh embed</span>
+          </div>
+        </div>
+      )}
+
+      {/* Direct audio file preview */}
+      {!ytId && rd.audio && (
+        <audio src={rd.audio} controls style={{ width: '100%', display: 'block' }} />
+      )}
     </div>
   );
 }
@@ -321,7 +395,7 @@ function HostSetup({ rounds, setRounds, duration, setDuration, onGenerate, sessi
     const count = Math.max(1, Math.min(20, n));
     setRounds(r => {
       if (count > r.length)
-        return [...r, ...Array.from({ length: count - r.length }, (_, i) => ({ label: `Round ${r.length + i + 1}`, audio: '', ai: 0 }))];
+        return [...r, ...Array.from({ length: count - r.length }, (_, i) => ({ label: `Round ${r.length + i + 1}`, audio: '', ytStart: 0, ytEnd: '', ai: 0 }))];
       return r.slice(0, count);
     });
   };
@@ -396,7 +470,7 @@ function HostSetup({ rounds, setRounds, duration, setDuration, onGenerate, sessi
                   placeholder={`Round ${i + 1} label…`} style={{ ...inp, flex: 1 }} />
               </div>
               <div style={{ marginBottom: 10 }}>
-                <AudioSlot url={rd.audio} onChange={v => setField(i, 'audio', v)} roundIdx={i} session={session} />
+                <AudioSlot rd={rd} onChangeField={(field, val) => setField(i, field, val)} roundIdx={i} session={session} />
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ color: '#555', fontSize: 12 }}>This voice is:</span>
@@ -475,11 +549,8 @@ function HostQuestion({ round, rounds, timer, duration, answeredCount, playerCou
           </div>
         </div>
 
-        <div style={{ borderRadius: 12, overflow: 'hidden', border: '2px solid #1e1e30', padding: 24, marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#11111c' }}>
-          {rd.audio
-            ? <audio src={rd.audio} controls style={{ width: '100%', maxWidth: 520 }} />
-            : <div style={{ color: '#333' }}>No audio set</div>
-          }
+        <div style={{ borderRadius: 12, overflow: 'hidden', border: '2px solid #1e1e30', padding: 20, marginBottom: 14, background: '#11111c' }}>
+          <AudioPlayer rd={rd} height={220} />
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
@@ -513,12 +584,9 @@ function HostReveal({ round, rounds, correctIdx, correctCount, totalAnswered, le
           </div>
         </div>
 
-        <div style={{ borderRadius: 12, overflow: 'hidden', border: '3px solid #f0e040', boxShadow: '0 0 30px rgba(240,224,64,0.2)', position: 'relative', padding: 24, marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#11111c' }}>
-          {rd.audio
-            ? <audio src={rd.audio} controls style={{ width: '100%', maxWidth: 520 }} />
-            : <div style={{ color: '#333' }}>No audio set</div>
-          }
-          <div style={{ position: 'absolute', top: 10, left: 10, background: '#f0e040', color: '#0a0a0f', fontWeight: 900, fontSize: 13, padding: '5px 14px', borderRadius: 6, fontFamily: 'monospace' }}>
+        <div style={{ borderRadius: 12, overflow: 'hidden', border: '3px solid #f0e040', boxShadow: '0 0 30px rgba(240,224,64,0.2)', position: 'relative', padding: 20, marginBottom: 20, background: '#11111c' }}>
+          <AudioPlayer rd={rd} height={200} />
+          <div style={{ marginTop: 10, textAlign: 'center', background: '#f0e040', color: '#0a0a0f', fontWeight: 900, fontSize: 14, padding: '7px 0', borderRadius: 6, fontFamily: 'monospace', letterSpacing: 1 }}>
             {correctIdx === 1 ? '🤖 AI-GENERATED VOICE' : '🧑 REAL VOICE'}
           </div>
         </div>
@@ -680,11 +748,8 @@ function PlayerFlow({ config }) {
           <TimerRing seconds={timer} total={duration} />
         </div>
 
-        <div style={{ ...card, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px 12px', marginBottom: 16 }}>
-          {rd?.audio
-            ? <audio src={rd.audio} controls style={{ width: '100%' }} />
-            : <div style={{ color: '#333' }}>No audio</div>
-          }
+        <div style={{ ...card, padding: '16px 12px', marginBottom: 16 }}>
+          <AudioPlayer rd={rd} height={180} />
         </div>
 
         {myAns !== undefined ? (
