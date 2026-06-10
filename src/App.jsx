@@ -207,8 +207,10 @@ function HostFlow() {
   const [rounds, setRounds] = useState(() => {
     try { return JSON.parse(localStorage.getItem('aig-rounds')) || DEFAULT_ROUNDS; } catch { return DEFAULT_ROUNDS; }
   });
-  const [duration, setDuration] = useState(20);       // fallback if audio has no metadata
-  const [roundDuration, setRoundDuration] = useState(20); // effective duration for current round
+  const [duration] = useState(20);                     // fallback when audio has no metadata
+  const [roundDuration, setRoundDuration] = useState(20);
+  const [timerDone, setTimerDone] = useState(false);   // true after audio finishes playing
+  const [replayUsed, setReplayUsed] = useState(false); // true after host pressed Replay once
   const [session] = useState(genId);
   const [playerUrl, setPlayerUrl] = useState('');
   const [players, setPlayers] = useState([]);
@@ -217,7 +219,6 @@ function HostFlow() {
   const [timer, setTimer] = useState(0);
   const [roundStart, setRoundStart] = useState(null);
   const timerRef = useRef(null);
-  const revealedRef = useRef(false);
 
   // Poll players + answers while game is running
   useEffect(() => {
@@ -233,18 +234,17 @@ function HostFlow() {
     }
   }, [hostPhase, session]);
 
-  // Countdown timer — uses roundDuration (derived from audio length)
+  // Countdown timer — stops at 0, never auto-reveals; host controls what happens next
   useEffect(() => {
     clearInterval(timerRef.current);
-    revealedRef.current = false;
     if (hostPhase === 'question' && roundStart) {
       const tick = () => {
         const elapsed = (Date.now() - roundStart) / 1000;
         const left = Math.max(0, Math.ceil(roundDuration - elapsed));
         setTimer(left);
-        if (left <= 0 && !revealedRef.current) {
+        if (left <= 0) {
           clearInterval(timerRef.current);
-          doReveal();
+          setTimerDone(true);
         }
       };
       tick();
@@ -267,28 +267,26 @@ function HostFlow() {
     const now = Date.now();
     const rd0dur = getRoundDuration(rounds[0], duration);
     setRound(0); setRoundStart(now); setTimer(rd0dur); setRoundDuration(rd0dur);
+    setTimerDone(false); setReplayUsed(false);
     setHostPhase('question');
     await patchGameState(session, { phase: 'question', round: 0, round_start: now });
   };
 
+  const doReplay = () => {
+    const now = Date.now();
+    setReplayUsed(true);
+    setTimerDone(false);
+    setRoundStart(now);
+    setTimer(roundDuration);
+  };
+
   const doReveal = async () => {
-    if (revealedRef.current) return;
-    revealedRef.current = true;
     clearInterval(timerRef.current);
     setHostPhase('reveal');
     await patchGameState(session, { phase: 'reveal' });
     const as = await getAnswers(session);
     setAnswers(as);
   };
-
-  // Auto-reveal when every player has answered
-  useEffect(() => {
-    if (hostPhase !== 'question') return;
-    const roundAnswerCount = answers.filter(a => a.round === round).length;
-    if (players.length > 0 && roundAnswerCount >= players.length) {
-      doReveal();
-    }
-  }, [answers, players, hostPhase, round]);
 
   const doNext = async () => {
     if (round + 1 >= rounds.length) {
@@ -299,6 +297,7 @@ function HostFlow() {
       const now = Date.now();
       const nextDur = getRoundDuration(rounds[next], duration);
       setRound(next); setRoundStart(now); setTimer(nextDur); setRoundDuration(nextDur);
+      setTimerDone(false); setReplayUsed(false);
       setHostPhase('question');
       await patchGameState(session, { phase: 'question', round: next, round_start: now });
     }
@@ -313,7 +312,7 @@ function HostFlow() {
   const roundAnswers = answers.filter(a => a.round === round);
 
   if (hostPhase === 'setup') return (
-    <HostSetup rounds={rounds} setRounds={setRounds} duration={duration} setDuration={setDuration} onGenerate={doGenerate} session={session} />
+    <HostSetup rounds={rounds} setRounds={setRounds} duration={duration} onGenerate={doGenerate} session={session} />
   );
 
   if (hostPhase === 'lobby') return (
@@ -322,8 +321,9 @@ function HostFlow() {
 
   if (hostPhase === 'question') return (
     <HostQuestion round={round} rounds={rounds} timer={timer} duration={roundDuration}
+      roundStart={roundStart} timerDone={timerDone} replayUsed={replayUsed}
       answeredCount={roundAnswers.length} playerCount={players.length}
-      leaderboard={leaderboard} onReveal={doReveal} />
+      leaderboard={leaderboard} onReplay={doReplay} onReveal={doReveal} />
   );
 
   if (hostPhase === 'reveal') {
@@ -423,7 +423,7 @@ function AudioSlot({ rd, onChangeField, roundIdx, session }) {
   );
 }
 
-function HostSetup({ rounds, setRounds, duration, setDuration, onGenerate, session }) {
+function HostSetup({ rounds, setRounds, duration, onGenerate, session }) {
   // Persist rounds (including correct answers) on every change
   useEffect(() => {
     localStorage.setItem('aig-rounds', JSON.stringify(rounds));
@@ -458,7 +458,7 @@ function HostSetup({ rounds, setRounds, duration, setDuration, onGenerate, sessi
     reader.onload = (ev) => {
       try {
         const data = JSON.parse(ev.target.result);
-        if (data.rounds) { setRounds(data.rounds); if (data.duration) setDuration(data.duration); }
+        if (data.rounds) { setRounds(data.rounds); }
         else alert('Invalid file — no rounds found.');
       } catch { alert('Could not read file. Make sure it is a valid game export.'); }
     };
@@ -487,21 +487,14 @@ function HostSetup({ rounds, setRounds, duration, setDuration, onGenerate, sessi
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
-          <div style={{ ...card, display: 'flex', alignItems: 'center', gap: 12 }}>
-            <label style={{ color: '#888', fontSize: 13, whiteSpace: 'nowrap' }}>Seconds / round</label>
-            <input type="range" min={10} max={60} step={5} value={duration}
-              onChange={e => setDuration(+e.target.value)} style={{ flex: 1, accentColor: '#f0e040' }} />
-            <span style={{ color: '#f0e040', fontWeight: 700, fontFamily: 'monospace', minWidth: 36 }}>{duration}s</span>
-          </div>
-          <div style={{ ...card, display: 'flex', alignItems: 'center', gap: 12 }}>
-            <label style={{ color: '#888', fontSize: 13, whiteSpace: 'nowrap' }}>Number of rounds</label>
-            <button onClick={() => setRoundCount(rounds.length - 1)}
-              style={{ ...btn('#1a1a2e', '#f0e040', true), border: '1.5px solid #2a2a3e', padding: '6px 14px', fontSize: 18 }}>−</button>
-            <span style={{ color: '#f0e040', fontWeight: 700, fontFamily: 'monospace', fontSize: 18, minWidth: 28, textAlign: 'center' }}>{rounds.length}</span>
-            <button onClick={() => setRoundCount(rounds.length + 1)}
-              style={{ ...btn('#1a1a2e', '#f0e040', true), border: '1.5px solid #2a2a3e', padding: '6px 14px', fontSize: 18 }}>+</button>
-          </div>
+        <div style={{ ...card, display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+          <label style={{ color: '#888', fontSize: 13, whiteSpace: 'nowrap' }}>Number of rounds</label>
+          <button onClick={() => setRoundCount(rounds.length - 1)}
+            style={{ ...btn('#1a1a2e', '#f0e040', true), border: '1.5px solid #2a2a3e', padding: '6px 14px', fontSize: 18 }}>−</button>
+          <span style={{ color: '#f0e040', fontWeight: 700, fontFamily: 'monospace', fontSize: 18, minWidth: 28, textAlign: 'center' }}>{rounds.length}</span>
+          <button onClick={() => setRoundCount(rounds.length + 1)}
+            style={{ ...btn('#1a1a2e', '#f0e040', true), border: '1.5px solid #2a2a3e', padding: '6px 14px', fontSize: 18 }}>+</button>
+          <span style={{ color: '#444', fontSize: 11, marginLeft: 8 }}>Timer = audio duration per round</span>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
@@ -578,11 +571,10 @@ function HostLobby({ playerUrl, players, onStart, onBack }) {
 }
 
 // ─── Host: Question ───────────────────────────────────────────────────────────
-function HostQuestion({ round, rounds, timer, duration, answeredCount, playerCount, leaderboard, onReveal }) {
+function HostQuestion({ round, rounds, timer, duration, roundStart, timerDone, replayUsed, answeredCount, playerCount, leaderboard, onReplay, onReveal }) {
   const rd = rounds[round];
-  const [replayKey, setReplayKey] = useState(0);
-  // Reset replay key when round changes so audio always starts fresh
-  useEffect(() => { setReplayKey(0); }, [round]);
+  // playing = audio running | done1 = first play finished | playing2 = replay running | done2 = replay finished
+  const state = !timerDone ? (replayUsed ? 'playing2' : 'playing') : (replayUsed ? 'done2' : 'done1');
 
   return (
     <div style={{ ...pg, justifyContent: 'flex-start', paddingTop: 20 }}>
@@ -601,16 +593,28 @@ function HostQuestion({ round, rounds, timer, duration, answeredCount, playerCou
           </div>
         </div>
 
-        <div style={{ borderRadius: 12, overflow: 'hidden', border: '2px solid #1e1e30', padding: 20, marginBottom: 10, background: '#11111c' }}>
-          <AudioPlayer rd={rd} replayKey={replayKey} />
+        {/* Audio player — visible while playing, hidden when timer is done */}
+        <div style={{ borderRadius: 12, overflow: 'hidden', border: '2px solid #1e1e30', padding: 20, marginBottom: 10, background: '#11111c', minHeight: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {(state === 'playing' || state === 'playing2')
+            ? <AudioPlayer rd={rd} replayKey={roundStart} />
+            : <div style={{ color: '#555', fontFamily: 'monospace', fontSize: 14 }}>
+                {state === 'done1' ? '⏰ Audio finished — replay or reveal?' : '⏰ Audio finished — reveal when ready'}
+              </div>
+          }
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginBottom: 18 }}>
-          <button onClick={() => setReplayKey(k => k + 1)}
-            style={{ ...btn('#1a1a2e', '#f0e040', true), border: '1.5px solid #2a2a3e' }}>
-            🔁 Replay
+          {/* Replay: only available once, only when first play is done */}
+          {state === 'done1' && (
+            <button onClick={onReplay} style={{ ...btn('#1a1a2e', '#f0e040', true), border: '1.5px solid #f0e040' }}>
+              🔁 Replay (once)
+            </button>
+          )}
+          {/* Reveal: always available but only prominent when audio is done */}
+          <button onClick={onReveal}
+            style={state === 'playing' ? btn('#1a1a2e', '#555', true) : btn('#ff6b6b', '#fff', true)}>
+            ⏭ Reveal Now
           </button>
-          <button onClick={onReveal} style={btn('#ff6b6b', '#fff', true)}>⏭ Reveal Now</button>
         </div>
 
         {leaderboard.length > 0 && (
