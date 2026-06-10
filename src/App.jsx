@@ -737,9 +737,11 @@ function PlayerFlow({ config }) {
   useEffect(() => {
     clearInterval(timerRef.current);
     if (gameState?.phase === 'question' && gameState.round_start) {
+      const rd = rounds[gameState.round];
+      const rdDur = getRoundDuration(rd, duration);
       const tick = () => {
         const e = (Date.now() - gameState.round_start) / 1000;
-        setTimer(Math.max(0, Math.ceil(duration - e)));
+        setTimer(Math.max(0, Math.ceil(rdDur - e)));
       };
       tick();
       timerRef.current = setInterval(tick, 500);
