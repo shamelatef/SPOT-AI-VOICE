@@ -780,10 +780,6 @@ function PlayerFlow({ config }) {
           <TimerRing seconds={timer} total={duration} />
         </div>
 
-        <div style={{ ...card, padding: '16px 12px', marginBottom: 16 }}>
-          <AudioPlayer rd={rd} />
-        </div>
-
         {myAns !== undefined ? (
           <div style={{ textAlign: 'center', padding: '40px 20px' }}>
             <div style={{ fontSize: 54 }}>✅</div>
