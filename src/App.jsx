@@ -323,6 +323,7 @@ function HostFlow() {
     <HostQuestion round={round} rounds={rounds} timer={timer} duration={roundDuration}
       roundStart={roundStart} timerDone={timerDone} replayUsed={replayUsed}
       answeredCount={roundAnswers.length} playerCount={players.length}
+      allAnswered={players.length > 0 && roundAnswers.length >= players.length}
       leaderboard={leaderboard} onReplay={doReplay} onReveal={doReveal} />
   );
 
@@ -571,7 +572,7 @@ function HostLobby({ playerUrl, players, onStart, onBack }) {
 }
 
 // ─── Host: Question ───────────────────────────────────────────────────────────
-function HostQuestion({ round, rounds, timer, duration, roundStart, timerDone, replayUsed, answeredCount, playerCount, leaderboard, onReplay, onReveal }) {
+function HostQuestion({ round, rounds, timer, duration, roundStart, timerDone, replayUsed, answeredCount, playerCount, allAnswered, leaderboard, onReplay, onReveal }) {
   const rd = rounds[round];
   // playing = audio running | done1 = first play finished | playing2 = replay running | done2 = replay finished
   const state = !timerDone ? (replayUsed ? 'playing2' : 'playing') : (replayUsed ? 'done2' : 'done1');
@@ -610,9 +611,11 @@ function HostQuestion({ round, rounds, timer, duration, roundStart, timerDone, r
               🔁 Replay (once)
             </button>
           )}
-          {/* Reveal: always available but only prominent when audio is done */}
+          {/* Reveal: dimmed while audio plays unless all players already answered */}
           <button onClick={onReveal}
-            style={state === 'playing' ? btn('#1a1a2e', '#555', true) : btn('#ff6b6b', '#fff', true)}>
+            style={(state === 'playing' || state === 'playing2') && !allAnswered
+              ? btn('#1a1a2e', '#555', true)
+              : btn('#ff6b6b', '#fff', true)}>
             ⏭ Reveal Now
           </button>
         </div>
@@ -644,11 +647,8 @@ function HostReveal({ round, rounds, correctIdx, correctCount, totalAnswered, le
           </div>
         </div>
 
-        <div style={{ borderRadius: 12, overflow: 'hidden', border: '3px solid #f0e040', boxShadow: '0 0 30px rgba(240,224,64,0.2)', position: 'relative', padding: 20, marginBottom: 20, background: '#11111c' }}>
-          <AudioPlayer rd={rd} />
-          <div style={{ marginTop: 10, textAlign: 'center', background: '#f0e040', color: '#0a0a0f', fontWeight: 900, fontSize: 14, padding: '7px 0', borderRadius: 6, fontFamily: 'monospace', letterSpacing: 1 }}>
-            {correctIdx === 1 ? '🤖 AI-GENERATED VOICE' : '🧑 REAL VOICE'}
-          </div>
+        <div style={{ textAlign: 'center', background: '#f0e040', color: '#0a0a0f', fontWeight: 900, fontSize: 22, padding: '18px 0', borderRadius: 12, marginBottom: 20, letterSpacing: 1, boxShadow: '0 0 30px rgba(240,224,64,0.2)' }}>
+          {correctIdx === 1 ? '🤖 AI-GENERATED VOICE' : '🧑 REAL VOICE'}
         </div>
 
         <div style={{ marginBottom: 20 }}>
