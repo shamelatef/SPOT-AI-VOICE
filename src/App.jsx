@@ -657,6 +657,11 @@ function HostQuestion({ round, rounds, timer, duration, roundStart, timerDone, r
 function HostReveal({ round, rounds, correctIdx, correctCount, totalAnswered, leaderboard, onNext, playerUrl }) {
   const rd = rounds[round];
   const isLast = round + 1 >= rounds.length;
+  useEffect(() => {
+    const sfx = new Audio(`${import.meta.env.BASE_URL}correct-ding.mp3`);
+    sfx.play().catch(() => {});
+    return () => { sfx.pause(); sfx.src = ''; };
+  }, [round]);
   return (
     <div style={{ ...pg, justifyContent: 'flex-start', paddingTop: 20 }}>
       <div style={{ width: '100%', maxWidth: 960 }}>
@@ -697,7 +702,11 @@ function HostFinal({ leaderboard, totalRounds, onReset }) {
   const podiumOrder = [top3[1], top3[0], top3[2]].filter(Boolean);
   const podiumHeights = [150, 190, 115];
   const podiumIcons = ['🥈', '🥇', '🥉'];
-
+  useEffect(() => {
+    const sfx = new Audio(`${import.meta.env.BASE_URL}drum-roll.mp3`);
+    sfx.play().catch(() => {});
+    return () => { sfx.pause(); sfx.src = ''; };
+  }, []);
   return (
     <div style={pg}>
       <div style={{ width: '100%', maxWidth: 600 }}>
