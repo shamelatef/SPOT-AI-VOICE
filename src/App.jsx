@@ -324,7 +324,8 @@ function HostFlow() {
       roundStart={roundStart} timerDone={timerDone} replayUsed={replayUsed}
       answeredCount={roundAnswers.length} playerCount={players.length}
       allAnswered={players.length > 0 && roundAnswers.length >= players.length}
-      leaderboard={leaderboard} onReplay={doReplay} onReveal={doReveal} />
+      leaderboard={leaderboard} onReplay={doReplay} onReveal={doReveal}
+      playerUrl={playerUrl} />
   );
 
   if (hostPhase === 'reveal') {
@@ -333,7 +334,7 @@ function HostFlow() {
     return (
       <HostReveal round={round} rounds={rounds} correctIdx={correctIdx}
         correctCount={correctCount} totalAnswered={roundAnswers.length}
-        leaderboard={leaderboard} onNext={doNext} />
+        leaderboard={leaderboard} onNext={doNext} playerUrl={playerUrl} />
     );
   }
 
@@ -537,6 +538,10 @@ function HostSetup({ rounds, setRounds, duration, onGenerate, session }) {
 
 // ─── Host: Lobby ──────────────────────────────────────────────────────────────
 function HostLobby({ playerUrl, players, onStart, onBack }) {
+  const [copied, setCopied] = useState(false);
+  const copyLink = () => {
+    navigator.clipboard.writeText(playerUrl).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+  };
   return (
     <div style={pg}>
       <div style={{ width: '100%', maxWidth: 700, display: 'grid', gridTemplateColumns: '240px 1fr', gap: 40, alignItems: 'start' }}>
@@ -545,6 +550,9 @@ function HostLobby({ playerUrl, players, onStart, onBack }) {
           <div style={{ background: '#0e0e1a', border: '2px solid #f0e040', borderRadius: 14, padding: 14, marginBottom: 8, display: 'inline-block' }}>
             <QRCode url={playerUrl} size={190} />
           </div>
+          <button onClick={copyLink} style={{ ...btn('#1a1a2e', copied ? '#4caf50' : '#f0e040', true), border: '1.5px solid #2a2a3e', width: '100%', marginTop: 4 }}>
+            {copied ? '✅ Copied!' : '🔗 Copy Game Link'}
+          </button>
         </div>
         <div>
           <div style={{ fontSize: 28, fontWeight: 900, color: '#f0e040', fontFamily: 'monospace', marginBottom: 4 }}>LOBBY</div>
@@ -572,7 +580,18 @@ function HostLobby({ playerUrl, players, onStart, onBack }) {
 }
 
 // ─── Host: Question ───────────────────────────────────────────────────────────
-function HostQuestion({ round, rounds, timer, duration, roundStart, timerDone, replayUsed, answeredCount, playerCount, allAnswered, leaderboard, onReplay, onReveal }) {
+function MiniQR({ url }) {
+  return (
+    <div style={{ textAlign: 'center', flexShrink: 0 }}>
+      <div style={{ color: '#444', fontFamily: 'monospace', fontSize: 9, letterSpacing: 1, marginBottom: 4 }}>📱 JOIN</div>
+      <div style={{ background: '#0e0e1a', border: '1px solid #2a2a3e', borderRadius: 8, padding: 6, display: 'inline-block' }}>
+        <QRCode url={url} size={80} />
+      </div>
+    </div>
+  );
+}
+
+function HostQuestion({ round, rounds, timer, duration, roundStart, timerDone, replayUsed, answeredCount, playerCount, allAnswered, leaderboard, onReplay, onReveal, playerUrl }) {
   const rd = rounds[round];
   // playing = audio running | done1 = first play finished | playing2 = replay running | done2 = replay finished
   const state = !timerDone ? (replayUsed ? 'playing2' : 'playing') : (replayUsed ? 'done2' : 'done1');
@@ -592,6 +611,7 @@ function HostQuestion({ round, rounds, timer, duration, roundStart, timerDone, r
             <div style={{ color: '#f0e040', fontSize: 34, fontWeight: 900, fontFamily: 'monospace' }}>{answeredCount}</div>
             <div style={{ color: '#444', fontSize: 11 }}>of {playerCount}</div>
           </div>
+          {playerUrl && <MiniQR url={playerUrl} />}
         </div>
 
         {/* Audio player — visible while playing, hidden when timer is done */}
@@ -634,17 +654,20 @@ function HostQuestion({ round, rounds, timer, duration, roundStart, timerDone, r
 }
 
 // ─── Host: Reveal ─────────────────────────────────────────────────────────────
-function HostReveal({ round, rounds, correctIdx, correctCount, totalAnswered, leaderboard, onNext }) {
+function HostReveal({ round, rounds, correctIdx, correctCount, totalAnswered, leaderboard, onNext, playerUrl }) {
   const rd = rounds[round];
   const isLast = round + 1 >= rounds.length;
   return (
     <div style={{ ...pg, justifyContent: 'flex-start', paddingTop: 20 }}>
       <div style={{ width: '100%', maxWidth: 960 }}>
-        <div style={{ textAlign: 'center', marginBottom: 16 }}>
-          <div style={{ color: '#555', fontSize: 11, letterSpacing: 2, textTransform: 'uppercase' }}>Reveal — {rd.label}</div>
-          <div style={{ color: '#f0e040', fontSize: 24, fontWeight: 900, fontFamily: 'monospace' }}>
-            {correctCount} / {totalAnswered} got it right!
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+          <div style={{ textAlign: 'center', flex: 1 }}>
+            <div style={{ color: '#555', fontSize: 11, letterSpacing: 2, textTransform: 'uppercase' }}>Reveal — {rd.label}</div>
+            <div style={{ color: '#f0e040', fontSize: 24, fontWeight: 900, fontFamily: 'monospace' }}>
+              {correctCount} / {totalAnswered} got it right!
+            </div>
           </div>
+          {playerUrl && <MiniQR url={playerUrl} />}
         </div>
 
         <div style={{ textAlign: 'center', background: '#f0e040', color: '#0a0a0f', fontWeight: 900, fontSize: 22, padding: '18px 0', borderRadius: 12, marginBottom: 20, letterSpacing: 1, boxShadow: '0 0 30px rgba(240,224,64,0.2)' }}>
