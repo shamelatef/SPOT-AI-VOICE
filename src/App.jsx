@@ -77,32 +77,26 @@ function YTPlayer({ videoId, ytStart = 0, ytEnd = '', height = 200 }) {
 // Audio-only: CSS-clips the iframe so only the 40 px control bar is visible.
 // The video frame sits above the container boundary and is never seen.
 function YTAudioPlayer({ videoId, ytStart = 0, ytEnd = '' }) {
-  const p = new URLSearchParams({ start: ytStart || 0, rel: 0, modestbranding: 1 });
+  // autoplay=1 triggers as soon as the iframe mounts (host just clicked Start/Next)
+  const p = new URLSearchParams({ start: ytStart || 0, rel: 0, modestbranding: 1, autoplay: 1 });
   if (ytEnd !== '' && ytEnd !== null) p.set('end', ytEnd);
   const src = `https://www.youtube-nocookie.com/embed/${videoId}?${p}`;
-  // iframe is 240 px tall; we clip the container to 42 px and anchor the iframe
-  // to the bottom, so only the control bar is in the visible region.
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' }}>
-      <div style={{ color: '#888', fontSize: 12, letterSpacing: 1, fontFamily: 'monospace' }}>
-        🎙️ PRESS PLAY TO LISTEN
-      </div>
-      <div style={{
-        position: 'relative', width: '100%', height: 42,
-        overflow: 'hidden', borderRadius: 8, background: '#000',
-        boxShadow: '0 0 0 1px rgba(255,255,255,0.06)',
-      }}>
-        <iframe key={src} src={src} width="100%" height="240"
-          style={{ position: 'absolute', bottom: 0, left: 0, border: 'none', width: '100%' }}
-          allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen />
-      </div>
+    <div style={{
+      position: 'relative', width: '100%', height: 42,
+      overflow: 'hidden', borderRadius: 8, background: '#000',
+      boxShadow: '0 0 0 1px rgba(255,255,255,0.06)',
+    }}>
+      <iframe key={src} src={src} width="100%" height="240"
+        style={{ position: 'absolute', bottom: 0, left: 0, border: 'none', width: '100%' }}
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowFullScreen />
     </div>
   );
 }
 
 // AudioPlayer: preview=true → full video embed (host setup only)
-//              preview=false (default) → audio-only control bar
+//              preview=false (default) → audio-only bar, autoplays on mount
 function AudioPlayer({ rd, preview = false, height = 200 }) {
   const ytId = parseYouTube(rd?.audio);
   if (!rd?.audio) return (
@@ -112,7 +106,7 @@ function AudioPlayer({ rd, preview = false, height = 200 }) {
     if (preview) return <YTPlayer videoId={ytId} ytStart={rd.ytStart ?? 0} ytEnd={rd.ytEnd ?? ''} height={height} />;
     return <YTAudioPlayer videoId={ytId} ytStart={rd.ytStart ?? 0} ytEnd={rd.ytEnd ?? ''} />;
   }
-  return <audio src={rd.audio} controls style={{ width: '100%' }} />;
+  return <audio key={rd.audio} src={rd.audio} controls autoPlay style={{ width: '100%' }} />;
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
