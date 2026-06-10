@@ -41,13 +41,24 @@ function calcMyScore(myAnswers, rounds) {
 
 // choice/ai: 0 = Real voice, 1 = AI-generated voice
 // audio: direct URL or YouTube URL  |  ytStart/ytEnd: crop in seconds (YouTube only)
+// audioDuration: auto-detected from <audio> metadata (direct files only)
 const DEFAULT_ROUNDS = Array.from({ length: 10 }, (_, i) => ({
   label: `Round ${i + 1}`,
   audio: '',
   ytStart: 0,
   ytEnd: '',
+  audioDuration: null,
   ai: 0,
 }));
+
+// Returns the effective timer duration for a round (seconds)
+function getRoundDuration(rd, fallback = 20) {
+  if (rd?.ytEnd !== '' && rd?.ytEnd != null && rd?.ytStart !== undefined) {
+    return Math.max(3, Number(rd.ytEnd) - Number(rd.ytStart || 0));
+  }
+  if (rd?.audioDuration) return Math.ceil(rd.audioDuration);
+  return fallback;
+}
 
 // ─── YouTube helpers ──────────────────────────────────────────────────────────
 function parseYouTube(url) {
@@ -76,8 +87,7 @@ function YTPlayer({ videoId, ytStart = 0, ytEnd = '', height = 200 }) {
 
 // Audio-only: CSS-clips the iframe so only the 40 px control bar is visible.
 // The video frame sits above the container boundary and is never seen.
-function YTAudioPlayer({ videoId, ytStart = 0, ytEnd = '' }) {
-  // autoplay=1 triggers as soon as the iframe mounts (host just clicked Start/Next)
+function YTAudioPlayer({ videoId, ytStart = 0, ytEnd = '', replayKey = 0 }) {
   const p = new URLSearchParams({ start: ytStart || 0, rel: 0, modestbranding: 1, autoplay: 1 });
   if (ytEnd !== '' && ytEnd !== null) p.set('end', ytEnd);
   const src = `https://www.youtube-nocookie.com/embed/${videoId}?${p}`;
@@ -87,7 +97,7 @@ function YTAudioPlayer({ videoId, ytStart = 0, ytEnd = '' }) {
       overflow: 'hidden', borderRadius: 8, background: '#000',
       boxShadow: '0 0 0 1px rgba(255,255,255,0.06)',
     }}>
-      <iframe key={src} src={src} width="100%" height="240"
+      <iframe key={`${src}-${replayKey}`} src={src} width="100%" height="240"
         style={{ position: 'absolute', bottom: 0, left: 0, border: 'none', width: '100%' }}
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
         allowFullScreen />
@@ -97,16 +107,16 @@ function YTAudioPlayer({ videoId, ytStart = 0, ytEnd = '' }) {
 
 // AudioPlayer: preview=true → full video embed (host setup only)
 //              preview=false (default) → audio-only bar, autoplays on mount
-function AudioPlayer({ rd, preview = false, height = 200 }) {
+function AudioPlayer({ rd, preview = false, height = 200, replayKey = 0 }) {
   const ytId = parseYouTube(rd?.audio);
   if (!rd?.audio) return (
     <div style={{ textAlign: 'center', color: '#444', fontSize: 13, padding: 24 }}>No audio set</div>
   );
   if (ytId) {
     if (preview) return <YTPlayer videoId={ytId} ytStart={rd.ytStart ?? 0} ytEnd={rd.ytEnd ?? ''} height={height} />;
-    return <YTAudioPlayer videoId={ytId} ytStart={rd.ytStart ?? 0} ytEnd={rd.ytEnd ?? ''} />;
+    return <YTAudioPlayer videoId={ytId} ytStart={rd.ytStart ?? 0} ytEnd={rd.ytEnd ?? ''} replayKey={replayKey} />;
   }
-  return <audio key={rd.audio} src={rd.audio} controls autoPlay style={{ width: '100%' }} />;
+  return <audio key={`${rd.audio}-${replayKey}`} src={rd.audio} controls autoPlay style={{ width: '100%' }} />;
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -197,7 +207,8 @@ function HostFlow() {
   const [rounds, setRounds] = useState(() => {
     try { return JSON.parse(localStorage.getItem('aig-rounds')) || DEFAULT_ROUNDS; } catch { return DEFAULT_ROUNDS; }
   });
-  const [duration, setDuration] = useState(20);
+  const [duration, setDuration] = useState(20);       // fallback if audio has no metadata
+  const [roundDuration, setRoundDuration] = useState(20); // effective duration for current round
   const [session] = useState(genId);
   const [playerUrl, setPlayerUrl] = useState('');
   const [players, setPlayers] = useState([]);
@@ -222,14 +233,14 @@ function HostFlow() {
     }
   }, [hostPhase, session]);
 
-  // Countdown timer
+  // Countdown timer — uses roundDuration (derived from audio length)
   useEffect(() => {
     clearInterval(timerRef.current);
     revealedRef.current = false;
     if (hostPhase === 'question' && roundStart) {
       const tick = () => {
         const elapsed = (Date.now() - roundStart) / 1000;
-        const left = Math.max(0, Math.ceil(duration - elapsed));
+        const left = Math.max(0, Math.ceil(roundDuration - elapsed));
         setTimer(left);
         if (left <= 0 && !revealedRef.current) {
           clearInterval(timerRef.current);
@@ -240,7 +251,7 @@ function HostFlow() {
       timerRef.current = setInterval(tick, 500);
       return () => clearInterval(timerRef.current);
     }
-  }, [hostPhase, roundStart, duration]);
+  }, [hostPhase, roundStart, roundDuration]);
 
   const doGenerate = () => {
     const cfg = { session, duration, rounds };
@@ -254,7 +265,8 @@ function HostFlow() {
 
   const doStart = async () => {
     const now = Date.now();
-    setRound(0); setRoundStart(now); setTimer(duration);
+    const rd0dur = getRoundDuration(rounds[0], duration);
+    setRound(0); setRoundStart(now); setTimer(rd0dur); setRoundDuration(rd0dur);
     setHostPhase('question');
     await patchGameState(session, { phase: 'question', round: 0, round_start: now });
   };
@@ -285,7 +297,8 @@ function HostFlow() {
     } else {
       const next = round + 1;
       const now = Date.now();
-      setRound(next); setRoundStart(now); setTimer(duration);
+      const nextDur = getRoundDuration(rounds[next], duration);
+      setRound(next); setRoundStart(now); setTimer(nextDur); setRoundDuration(nextDur);
       setHostPhase('question');
       await patchGameState(session, { phase: 'question', round: next, round_start: now });
     }
@@ -308,7 +321,7 @@ function HostFlow() {
   );
 
   if (hostPhase === 'question') return (
-    <HostQuestion round={round} rounds={rounds} timer={timer} duration={duration}
+    <HostQuestion round={round} rounds={rounds} timer={timer} duration={roundDuration}
       answeredCount={roundAnswers.length} playerCount={players.length}
       leaderboard={leaderboard} onReveal={doReveal} />
   );
@@ -398,9 +411,13 @@ function AudioSlot({ rd, onChangeField, roundIdx, session }) {
         </div>
       )}
 
-      {/* Direct audio file preview */}
+      {/* Direct audio file preview — also captures duration via onLoadedMetadata */}
       {!ytId && rd.audio && (
-        <audio src={rd.audio} controls style={{ width: '100%', display: 'block' }} />
+        <audio src={rd.audio} controls style={{ width: '100%', display: 'block' }}
+          onLoadedMetadata={e => {
+            const dur = e.target.duration;
+            if (!isNaN(dur) && isFinite(dur)) onChangeField('audioDuration', dur);
+          }} />
       )}
     </div>
   );
@@ -421,7 +438,7 @@ function HostSetup({ rounds, setRounds, duration, setDuration, onGenerate, sessi
     const count = Math.max(1, Math.min(20, n));
     setRounds(r => {
       if (count > r.length)
-        return [...r, ...Array.from({ length: count - r.length }, (_, i) => ({ label: `Round ${r.length + i + 1}`, audio: '', ytStart: 0, ytEnd: '', ai: 0 }))];
+        return [...r, ...Array.from({ length: count - r.length }, (_, i) => ({ label: `Round ${r.length + i + 1}`, audio: '', ytStart: 0, ytEnd: '', audioDuration: null, ai: 0 }))];
       return r.slice(0, count);
     });
   };
@@ -498,7 +515,7 @@ function HostSetup({ rounds, setRounds, duration, setDuration, onGenerate, sessi
               <div style={{ marginBottom: 10 }}>
                 <AudioSlot rd={rd} onChangeField={(field, val) => setField(i, field, val)} roundIdx={i} session={session} />
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <span style={{ color: '#555', fontSize: 12 }}>This voice is:</span>
                 {[{ lbl: '🧑 Real', idx: 0 }, { lbl: '🤖 AI', idx: 1 }].map(({ lbl, idx }) => (
                   <button key={idx} onClick={() => setField(i, 'ai', idx)} style={{
@@ -506,6 +523,11 @@ function HostSetup({ rounds, setRounds, duration, setDuration, onGenerate, sessi
                     border: `1.5px solid ${rd.ai === idx ? '#f0e040' : '#2a2a3e'}`, padding: '6px 18px',
                   }}>{lbl}</button>
                 ))}
+                {rd.audio && (
+                  <span style={{ marginLeft: 'auto', color: '#f0e040', fontFamily: 'monospace', fontSize: 12, background: 'rgba(240,224,64,0.08)', border: '1px solid rgba(240,224,64,0.2)', borderRadius: 6, padding: '4px 10px' }}>
+                    ⏱ {getRoundDuration(rd, duration)}s
+                  </span>
+                )}
               </div>
             </div>
           ))}
@@ -558,6 +580,10 @@ function HostLobby({ playerUrl, players, onStart, onBack }) {
 // ─── Host: Question ───────────────────────────────────────────────────────────
 function HostQuestion({ round, rounds, timer, duration, answeredCount, playerCount, leaderboard, onReveal }) {
   const rd = rounds[round];
+  const [replayKey, setReplayKey] = useState(0);
+  // Reset replay key when round changes so audio always starts fresh
+  useEffect(() => { setReplayKey(0); }, [round]);
+
   return (
     <div style={{ ...pg, justifyContent: 'flex-start', paddingTop: 20 }}>
       <div style={{ width: '100%', maxWidth: 960 }}>
@@ -575,11 +601,15 @@ function HostQuestion({ round, rounds, timer, duration, answeredCount, playerCou
           </div>
         </div>
 
-        <div style={{ borderRadius: 12, overflow: 'hidden', border: '2px solid #1e1e30', padding: 20, marginBottom: 14, background: '#11111c' }}>
-          <AudioPlayer rd={rd} />
+        <div style={{ borderRadius: 12, overflow: 'hidden', border: '2px solid #1e1e30', padding: 20, marginBottom: 10, background: '#11111c' }}>
+          <AudioPlayer rd={rd} replayKey={replayKey} />
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginBottom: 18 }}>
+          <button onClick={() => setReplayKey(k => k + 1)}
+            style={{ ...btn('#1a1a2e', '#f0e040', true), border: '1.5px solid #2a2a3e' }}>
+            🔁 Replay
+          </button>
           <button onClick={onReveal} style={btn('#ff6b6b', '#fff', true)}>⏭ Reveal Now</button>
         </div>
 
