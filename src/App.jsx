@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import {
-  hasDB, upsertGameState, getGameState, patchGameState,
+  hasDB, hasStorage, upsertGameState, getGameState, patchGameState,
   joinGame, getPlayers, submitAnswer, getAnswers, uploadAudio,
 } from "./db.js";
 
@@ -355,11 +355,10 @@ function AudioSlot({ rd, onChangeField, roundIdx, session }) {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
-    const path = `${session}/${roundIdx}-${Date.now()}.${file.name.split('.').pop()}`;
-    const publicUrl = await uploadAudio(file, path);
+    const publicUrl = await uploadAudio(file);
     setUploading(false);
     if (publicUrl) onChangeField('audio', publicUrl);
-    else alert('Upload failed — check that the "game-audio" bucket exists and is public in Supabase.');
+    else alert('Upload failed — check your Cloudinary cloud name and upload preset in .env');
   };
 
   return (
@@ -372,7 +371,7 @@ function AudioSlot({ rd, onChangeField, roundIdx, session }) {
       <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
         <input value={rd.audio} onChange={e => onChangeField('audio', e.target.value)}
           placeholder="https://youtube.com/watch?v=… or https://… audio file" style={{ ...inp, flex: 1 }} />
-        {hasDB && (
+        {hasStorage && (
           <>
             <button onClick={() => fileRef.current?.click()} disabled={uploading}
               style={{ ...btn('#1a1a2e', uploading ? '#555' : '#f0e040', true), border: '1.5px solid #2a2a3e', whiteSpace: 'nowrap', padding: '8px 14px' }}>

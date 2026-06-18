@@ -1,6 +1,5 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
@@ -11,11 +10,14 @@ const firebaseConfig = {
   appId:             import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-export const hasDB = !!(firebaseConfig.apiKey && firebaseConfig.projectId);
+const CLOUDINARY_CLOUD  = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+const CLOUDINARY_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
 
-const app  = hasDB ? initializeApp(firebaseConfig) : null;
-const db   = hasDB ? getFirestore(app) : null;
-const stor = hasDB ? getStorage(app) : null;
+export const hasDB      = !!(firebaseConfig.apiKey && firebaseConfig.projectId);
+export const hasStorage = !!(CLOUDINARY_CLOUD && CLOUDINARY_PRESET);
+
+const app = hasDB ? initializeApp(firebaseConfig) : null;
+const db  = hasDB ? getFirestore(app) : null;
 
 // ── Game state ────────────────────────────────────────────────────────────────
 export async function upsertGameState(session, data) {
@@ -37,7 +39,6 @@ export async function patchGameState(session, patch) {
 // ── Players ───────────────────────────────────────────────────────────────────
 export async function joinGame(session, name) {
   if (!hasDB) return;
-  // setDoc with merge = ignore-duplicate behaviour
   await setDoc(doc(db, 'game_state', session, 'players', name), { name, session }, { merge: true });
 }
 
@@ -50,7 +51,6 @@ export async function getPlayers(session) {
 // ── Answers ───────────────────────────────────────────────────────────────────
 export async function submitAnswer(session, round, name, choice, elapsed) {
   if (!hasDB) return;
-  // doc id = round_name ensures one answer per player per round
   const id = `${round}_${name}`;
   await setDoc(
     doc(db, 'game_state', session, 'answers', id),
@@ -65,12 +65,20 @@ export async function getAnswers(session) {
   return snap.docs.map(d => d.data());
 }
 
-// ── Storage ───────────────────────────────────────────────────────────────────
-export async function uploadAudio(file, path) {
-  if (!hasDB) return null;
+// ── Storage (Cloudinary unsigned upload — no credit card required) ────────────
+export async function uploadAudio(file) {
+  if (!hasStorage) return null;
   try {
-    const storageRef = ref(stor, `game-audio/${path}`);
-    await uploadBytes(storageRef, file);
-    return await getDownloadURL(storageRef);
+    const form = new FormData();
+    form.append('file', file);
+    form.append('upload_preset', CLOUDINARY_PRESET);
+    form.append('resource_type', 'video'); // Cloudinary uses 'video' for audio files
+    const res = await fetch(
+      `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/video/upload`,
+      { method: 'POST', body: form },
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.secure_url ?? null;
   } catch { return null; }
 }
